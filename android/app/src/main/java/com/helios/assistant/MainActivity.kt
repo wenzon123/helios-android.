@@ -109,8 +109,16 @@ class MainActivity : ComponentActivity() {
                 }
             }
             result.onSuccess { file ->
-                modelState = "Modelo instalado • ${file.length() / (1024 * 1024)} MB"
-                respond("Modelo local importado. Na próxima mensagem vou inicializar a IA no próprio celular.")
+                modelState = "Modelo importado • preparando IA…"
+                runCatching { localAi.prepare(file.absolutePath) }
+                    .onSuccess { backend ->
+                        modelState = "Modelo instalado • ${file.length() / (1024 * 1024)} MB"
+                        respond("IA local pronta. Processamento preparado em ${backend}.")
+                    }
+                    .onFailure { error ->
+                        modelState = "Modelo importado, mas não iniciou"
+                        respond("O arquivo foi importado, mas a IA não iniciou: ${error.message ?: "erro desconhecido"}.")
+                    }
             }.onFailure {
                 modelState = "Falha ao importar modelo"
                 respond("Não consegui importar o modelo: ${it.message ?: "arquivo inválido"}.")
@@ -173,8 +181,17 @@ class MainActivity : ComponentActivity() {
             }
             result.onSuccess { file ->
                 modelDownloadProgress = 1f
-                modelState = "Qwen3 instalado • ${file.length() / (1024 * 1024)} MB"
-                voiceState = "IA local pronta"
+                modelState = "Qwen3 baixado • preparando IA…"
+                runCatching { localAi.prepare(file.absolutePath) }
+                    .onSuccess { backend ->
+                        modelState = "Qwen3 instalado • ${file.length() / (1024 * 1024)} MB"
+                        voiceState = "IA local pronta • ${backend}"
+                    }
+                    .onFailure { error ->
+                        modelState = "Qwen3 baixado, mas não iniciou"
+                        voiceState = "Falha ao iniciar IA"
+                        respond("O modelo foi baixado, mas não iniciou: ${error.message ?: "erro desconhecido"}.")
+                    }
             }.onFailure {
                 modelState = "Falha no download: ${it.message ?: "erro desconhecido"}"
                 File(filesDir, "models/helios-model.download").delete()
