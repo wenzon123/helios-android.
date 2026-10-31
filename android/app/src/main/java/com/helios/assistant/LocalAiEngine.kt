@@ -43,17 +43,19 @@ class LocalAiEngine {
             ).also { it.initialize() }
         }
 
-        val ready = gpuAttempt.getOrElse {
+        val ready = if (gpuAttempt.isSuccess) {
+            activeBackend = "GPU"
+            gpuAttempt.getOrThrow()
+        } else {
+            activeBackend = "CPU"
             Engine(
                 EngineConfig(
                     modelPath = modelPath,
                     backend = Backend.CPU(),
                     cacheDir = cachePath
                 )
-            ).also { it.initialize() }.also { activeBackend = "CPU" }
+            ).also { it.initialize() }
         }
-
-        if (activeBackend != "CPU") activeBackend = "GPU"
         engine = ready
         loadedPath = modelPath
         return ready
