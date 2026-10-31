@@ -52,7 +52,7 @@ class MainActivity : ComponentActivity() {
                 onSend = { handleUserText(it) },
                 onMic = { if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) speech.listen() else requestMic.launch(Manifest.permission.RECORD_AUDIO) },
                 onStop = { speech.stop() }, onRepeat = { if (lastReply.isNotBlank()) speech.speak(lastReply) },
-                onSettings = { }, initialBackendUrl = preferences.getString("backend_url", "http://localhost:8787") ?: "http://localhost:8787", onSaveBackend = { url -> preferences.edit().putString("backend_url", url).apply() })
+                onSettings = { }, initialBackendUrl = preferences.getString("backend_url", "") ?: "", onSaveBackend = { url -> preferences.edit().putString("backend_url", url).apply() })
         }
     }
     private fun handleUserText(raw: String) {
@@ -69,8 +69,8 @@ class MainActivity : ComponentActivity() {
                 else -> {
                     voiceState = "Conectando à IA"
                     val recent = dao.recent().reversed().map { Turn(it.role, it.content) }
-                    val base = preferences.getString("backend_url", "http://localhost:8787") ?: "http://localhost:8787"
-                    if (base.isBlank()) respond("Ainda preciso que você configure o endereço do backend nas configurações. As ações locais continuam disponíveis.")
+                    val base = preferences.getString("backend_url", "") ?: ""
+                    if (base.isBlank()) respond("Minha conexão com a IA ainda não foi configurada. Abra Configurações e informe a URL HTTPS do servidor HÉLIOS. A voz já funciona pelo botão do microfone.")
                     else runCatching { AiClient(base).reply(recent) }.onSuccess { respond(it.reply) }.onFailure { respond("Não consegui conectar à inteligência artificial. Verifique a internet e o endereço do backend.") }
                 }
             }
@@ -93,9 +93,9 @@ private fun HeliosScreen(messages: List<ChatMessage>, state: String, lastReply: 
                 title = { Text("Conexão com a IA") },
                 text = {
                     Column {
-                        Text("Endereço HTTPS do backend HÉLIOS. A chave do provedor fica somente no servidor.", fontSize = 13.sp)
+                        Text("Cole aqui a URL HTTPS do servidor HÉLIOS publicado. A chave da IA fica protegida no servidor, nunca no APK.", fontSize = 13.sp)
                         Spacer(Modifier.height(10.dp))
-                        OutlinedTextField(value = backendUrl, onValueChange = { backendUrl = it }, label = { Text("URL do backend") }, placeholder = { Text("https://seu-servidor.example") }, singleLine = true)
+                        OutlinedTextField(value = backendUrl, onValueChange = { backendUrl = it }, label = { Text("URL do backend") }, placeholder = { Text("https://helios-seuapp.onrender.com") }, singleLine = true)
                     }
                 },
                 confirmButton = { TextButton(onClick = { onSaveBackend(backendUrl.trim().trimEnd('/')); showSettings = false }) { Text("SALVAR") } },
