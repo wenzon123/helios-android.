@@ -81,7 +81,7 @@ class SpeechController(
         recognizer?.startListening(intent)
     }
 
-    fun speak(text: String, rate: Float = 1f) {
+    fun speak(text: String, rate: Float = 1.04f) {
         tts?.setSpeechRate(rate)
         tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "helios-reply")
     }
