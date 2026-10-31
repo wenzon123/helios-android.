@@ -10,6 +10,8 @@
         </intent>
     </queries>
     <application
+        <uses-native-library android:name="libvndksupport.so" android:required="false" />
+        <uses-native-library android:name="libOpenCL.so" android:required="false" />
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:label="HÉLIOS"
         android:usesCleartextTraffic="false"
