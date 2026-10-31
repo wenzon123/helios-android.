@@ -75,7 +75,8 @@ class MainActivity : ComponentActivity() {
                 },
                 onStop = { speech.stop() },
                 onRepeat = { if (lastReply.isNotBlank()) speech.speak(lastReply) },
-                onPickModel = { pickModel.launch(arrayOf("*/*")) }
+                onPickModel = { pickModel.launch(arrayOf("*/*")) },
+                onClearHistory = { clearConversationHistory() }
             )
         }
     }
@@ -152,6 +153,14 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun clearConversationHistory() {
+        lifecycleScope.launch {
+            dao.clear()
+            lastReply = ""
+            voiceState = "Histórico apagado"
+        }
+    }
+
     private suspend fun respond(text: String) {
         lastReply = text
         dao.insert(ChatMessage(role = "assistant", content = text))
@@ -176,7 +185,8 @@ private fun HeliosScreen(
     onMic: () -> Unit,
     onStop: () -> Unit,
     onRepeat: () -> Unit,
-    onPickModel: () -> Unit
+    onPickModel: () -> Unit,
+    onClearHistory: () -> Unit
 ) {
     var input by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(false) }
@@ -197,6 +207,12 @@ private fun HeliosScreen(
                         Text(modelStatus, color = Color(0xFF79DFF5), fontSize = 12.sp)
                         Spacer(Modifier.height(12.dp))
                         Text("Selecione um arquivo .litertlm obtido de uma fonte oficial e compatível com LiteRT-LM.", fontSize = 12.sp)
+                        Spacer(Modifier.height(12.dp))
+                        Text("Privacidade: o aplicativo não solicita acesso à internet e não grava arquivos de áudio. O reconhecimento offline depende do suporte do Android no aparelho.", fontSize = 12.sp, color = Color(0xFF9CB6C3))
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(onClick = { showSettings = false; onClearHistory() }) {
+                            Text("APAGAR HISTÓRICO DA CONVERSA", color = Color(0xFFFF9C9C))
+                        }
                     }
                 },
                 confirmButton = {
