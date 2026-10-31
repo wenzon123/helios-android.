@@ -116,6 +116,15 @@ class MainActivity : ComponentActivity() {
     private fun handleUserText(raw: String) {
         val text = raw.trim()
         if (text.isBlank()) return
+        val normalized = text.lowercase(Locale("pt", "BR"))
+            .replace(Regex("[^\\p{L}\\p{N} ]"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (normalized == "tchau helios" || normalized == "tchau elios") {
+            speech.endSession()
+            voiceState = "Sessão encerrada"
+            return
+        }
         lifecycleScope.launch {
             dao.insert(ChatMessage(role = "user", content = text))
             val lower = text.lowercase(Locale("pt", "BR"))
