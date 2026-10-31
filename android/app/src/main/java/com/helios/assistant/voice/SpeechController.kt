@@ -24,9 +24,19 @@ class SpeechController(
         offlineAvailable = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             SpeechRecognizer.isOnDeviceRecognitionAvailable(appContext)
 
-        if (offlineAvailable) {
-            recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(appContext).apply {
-                setRecognitionListener(object : RecognitionListener {
+        if (offlineAvailable) createRecognizer()
+
+        tts = TextToSpeech(appContext) { status ->
+            if (status == TextToSpeech.SUCCESS) {
+                tts?.language = Locale("pt", "BR")
+            }
+        }
+    }
+
+    private fun createRecognizer() {
+        if (!offlineAvailable || recognizer != null) return
+        recognizer = SpeechRecognizer.createOnDeviceSpeechRecognizer(appContext).apply {
+            setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) { onState("Ouvindo localmente") }
                     override fun onBeginningOfSpeech() {}
                     override fun onRmsChanged(rmsdB: Float) {}
@@ -39,22 +49,16 @@ class SpeechController(
                     }
                     override fun onPartialResults(partialResults: Bundle?) {}
                     override fun onEvent(eventType: Int, params: Bundle?) {}
-                })
-            }
-        }
-
-        tts = TextToSpeech(appContext) { status ->
-            if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale("pt", "BR")
-            }
+            })
         }
     }
 
     fun listen() {
-        if (!offlineAvailable || recognizer == null) {
+        if (!offlineAvailable) {
             onState("Reconhecimento offline indisponível neste aparelho")
             return
         }
+        createRecognizer()
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "pt-BR")
@@ -75,8 +79,18 @@ class SpeechController(
         onState("Pronto")
     }
 
-    fun close() {
+    fun endSession() {
+        recognizer?.cancel()
         recognizer?.destroy()
+        recognizer = null
+        tts?.stop()
+        onState("Sessão encerrada")
+    }
+
+    fun close() {
+        recognizer?.cancel()
+        recognizer?.destroy()
+        recognizer = null
         tts?.shutdown()
     }
 }
