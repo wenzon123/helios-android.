@@ -28,7 +28,18 @@ class SpeechController(
 
         tts = TextToSpeech(appContext) { status ->
             if (status == TextToSpeech.SUCCESS) {
-                tts?.language = Locale("pt", "BR")
+                val portugueseVoices = tts?.voices.orEmpty().filter { it.locale.language == "pt" }
+                val maleVoice = portugueseVoices.firstOrNull { voice ->
+                    voice.name.contains("male", ignoreCase = true) ||
+                        voice.features.any { feature -> feature.contains("gender=male", ignoreCase = true) }
+                }
+                val brazilianVoice = portugueseVoices.firstOrNull { it.locale.country == "BR" }
+                val selectedVoice = maleVoice ?: brazilianVoice
+                if (selectedVoice != null) tts?.voice = selectedVoice
+                else tts?.language = Locale("pt", "BR")
+                // Timbre mais grave e ritmo ligeiramente mais calmo; a voz exata depende do pacote TTS instalado.
+                tts?.setPitch(0.82f)
+                tts?.setSpeechRate(0.94f)
             }
         }
     }
