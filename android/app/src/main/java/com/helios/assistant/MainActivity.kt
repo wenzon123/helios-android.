@@ -221,7 +221,7 @@ class MainActivity : ComponentActivity() {
                         respond("A IA local ainda não tem um modelo instalado. Abra Configurações e toque em IMPORTAR MODELO para selecionar um arquivo .litertlm.")
                     } else {
                         voiceState = "IA LOCAL PROCESSANDO"
-                        val history = dao.recent().reversed().dropLast(1).takeLast(10).map { Turn(it.role, it.content) }
+                        val history = dao.recent().reversed().dropLast(1).takeLast(4).map { Turn(it.role, it.content) }
                         runCatching { localAi.reply(modelFile.absolutePath, history, text) }
                             .onSuccess { respond(it) }
                             .onFailure { respond("Não consegui iniciar ou executar o modelo local. Confira se o arquivo é compatível. Detalhe: ${it.message ?: "erro desconhecido"}") }
@@ -328,7 +328,7 @@ private fun HeliosScreen(
                 }
                 Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(state.uppercase(), color = Color(0xFFFFCE32), fontSize = 11.sp, letterSpacing = 3.sp)
-                    Text(if (modelStatus.startsWith("Modelo instalado")) "IA LOCAL DISPONÍVEL" else "AGUARDANDO MODELO LOCAL", color = Color(0xFF9D7D28), fontSize = 8.sp)
+                    Text(if (modelStatus.contains("instalado", ignoreCase = true)) "IA LOCAL DISPONÍVEL" else "AGUARDANDO MODELO LOCAL", color = Color(0xFF9D7D28), fontSize = 8.sp)
                 }
             }
             Text("CONVERSA", color = Color(0xFFDDB43B), fontSize = 10.sp, letterSpacing = 2.sp)
