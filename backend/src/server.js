@@ -60,5 +60,5 @@ app.post('/v1/chat', async (req, res) => {
   }
 });
 const port = Number(process.env.PORT || 8787);
-const host = process.env.HOST || '127.0.0.1';
+const host = process.env.HOST || '0.0.0.0';
 app.listen(port, host, () => console.log(`HÉLIOS backend listening on http://${host}:${port}`));
