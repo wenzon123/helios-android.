@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class LocalAiEngine {
     private val mutex = Mutex()
@@ -27,7 +28,8 @@ class LocalAiEngine {
                     Engine(
                         EngineConfig(
                             modelPath = modelPath,
-                            backend = Backend.CPU()
+                            backend = Backend.GPU(),
+                            cacheDir = File(modelPath).parentFile?.resolve("litert-cache")?.apply { mkdirs() }?.absolutePath
                         )
                     ).also {
                         it.initialize()
@@ -45,9 +47,9 @@ class LocalAiEngine {
                 }
                 val conversationConfig = ConversationConfig(
                     systemInstruction = Contents.of(
-                        "Você é HÉLIOS, um assistente pessoal em português brasileiro. " +
-                            "Seja natural, claro, cuidadoso e objetivo. " +
-                            "Não invente informações e avise quando não souber."
+                        "Você é HÉLIOS, assistente pessoal em português brasileiro. " +
+                            "Responda naturalmente, de forma direta e curta. " +
+                            "Não invente fatos; admita quando não souber."
                     ),
                     initialMessages = initialMessages
                 )
