@@ -38,6 +38,8 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.net.HttpURLConnection
+import java.net.URL
 
 class MainActivity : ComponentActivity() {
     private lateinit var dao: ChatDao
@@ -47,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private var voiceState by mutableStateOf("Pronto")
     private var lastReply by mutableStateOf("")
     private var modelState by mutableStateOf("Modelo local não instalado")
+    private var modelDownloadProgress by mutableStateOf(0f)
     private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) speech.listen() else voiceState = "Permissão de microfone negada"
     }
@@ -68,6 +71,7 @@ class MainActivity : ComponentActivity() {
                 messages = messages,
                 state = voiceState,
                 modelStatus = modelState,
+                downloadProgress = modelDownloadProgress,
                 onSend = { handleUserText(it) },
                 onMic = {
                     if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) speech.listen()
@@ -76,6 +80,7 @@ class MainActivity : ComponentActivity() {
                 onStop = { speech.stop() },
                 onRepeat = { if (lastReply.isNotBlank()) speech.speak(lastReply) },
                 onPickModel = { pickModel.launch(arrayOf("*/*")) },
+                onDownloadModel = { downloadRecommendedModel() },
                 onClearHistory = { clearConversationHistory() }
             )
         }
@@ -109,6 +114,70 @@ class MainActivity : ComponentActivity() {
             }.onFailure {
                 modelState = "Falha ao importar modelo"
                 respond("Não consegui importar o modelo: ${it.message ?: "arquivo inválido"}.")
+            }
+        }
+    }
+
+
+    private fun downloadRecommendedModel() {
+        lifecycleScope.launch {
+            modelState = "Preparando download do Qwen3…"
+            modelDownloadProgress = 0f
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val folder = File(filesDir, "models").apply { mkdirs() }
+                    val temp = File(folder, "helios-model.download")
+                    val url = URL("https://huggingface.co/litert-community/Qwen3-0.6B-int4/resolve/main/qwen3_0.6b_nothink_q4_block32_ekv1280.litertlm")
+                    val connection = (url.openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 20000
+                        readTimeout = 60000
+                        instanceFollowRedirects = true
+                        setRequestProperty("User-Agent", "Helios-Android")
+                    }
+                    try {
+                        connection.connect()
+                        check(connection.responseCode == HttpURLConnection.HTTP_OK) {
+                            "Servidor retornou HTTP ${connection.responseCode}"
+                        }
+                        val total = connection.contentLengthLong
+                        if (total > 0) check(total in (250L * 1024 * 1024)..(450L * 1024 * 1024)) {
+                            "O tamanho recebido não corresponde ao modelo esperado."
+                        }
+                        var copied = 0L
+                        connection.inputStream.use { input ->
+                            FileOutputStream(temp).use { output ->
+                                val buffer = ByteArray(1024 * 1024)
+                                while (true) {
+                                    val count = input.read(buffer)
+                                    if (count < 0) break
+                                    output.write(buffer, 0, count)
+                                    copied += count
+                                    if (total > 0) {
+                                        val progress = (copied.toFloat() / total).coerceIn(0f, 1f)
+                                        runOnUiThread { modelDownloadProgress = progress }
+                                    }
+                                }
+                            }
+                        }
+                        check(temp.length() >= 250L * 1024 * 1024) {
+                            "Download incompleto. Tente novamente com uma conexão estável."
+                        }
+                        val target = File(folder, "helios-model.litertlm")
+                        if (target.exists()) target.delete()
+                        check(temp.renameTo(target)) { "Não foi possível finalizar a instalação do modelo." }
+                        target
+                    } finally {
+                        connection.disconnect()
+                    }
+                }
+            }
+            result.onSuccess { file ->
+                modelDownloadProgress = 1f
+                modelState = "Qwen3 instalado • ${file.length() / (1024 * 1024)} MB"
+                voiceState = "IA local pronta"
+            }.onFailure {
+                modelState = "Falha no download: ${it.message ?: "erro desconhecido"}"
+                File(filesDir, "models/helios-model.download").delete()
             }
         }
     }
@@ -190,11 +259,13 @@ private fun HeliosScreen(
     messages: List<ChatMessage>,
     state: String,
     modelStatus: String,
+    downloadProgress: Float,
     onSend: (String) -> Unit,
     onMic: () -> Unit,
     onStop: () -> Unit,
     onRepeat: () -> Unit,
     onPickModel: () -> Unit,
+    onDownloadModel: () -> Unit,
     onClearHistory: () -> Unit
 ) {
     var input by remember { mutableStateOf("") }
@@ -204,7 +275,7 @@ private fun HeliosScreen(
         animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
         label = "core"
     )
-    MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF48D9FF), background = Color(0xFF050B14), surface = Color(0xFF0B1725))) {
+    MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFFFFC928), background = Color(0xFF090806), surface = Color(0xFF17130A))) {
         if (showSettings) {
             AlertDialog(
                 onDismissRequest = { showSettings = false },
@@ -213,11 +284,18 @@ private fun HeliosScreen(
                     Column {
                         Text("O modelo é armazenado no celular e a conversa é processada localmente. O arquivo não vem dentro do APK.", fontSize = 13.sp)
                         Spacer(Modifier.height(10.dp))
-                        Text(modelStatus, color = Color(0xFF79DFF5), fontSize = 12.sp)
+                        Text(modelStatus, color = Color(0xFFFFD34E), fontSize = 12.sp)
+                        if (modelStatus.startsWith("Baixando") || modelStatus.startsWith("Preparando")) {
+                            Spacer(Modifier.height(8.dp))
+                            LinearProgressIndicator(progress = { downloadProgress }, modifier = Modifier.fillMaxWidth(), color = Color(0xFFFFC928))
+                            Text("${(downloadProgress * 100).toInt()}%", fontSize = 11.sp, color = Color(0xFFC7B98F))
+                        }
                         Spacer(Modifier.height(12.dp))
-                        Text("Selecione um arquivo .litertlm obtido de uma fonte oficial e compatível com LiteRT-LM.", fontSize = 12.sp)
+                        Text("Você pode baixar o Qwen3 0.6B (aprox. 329 MB) diretamente aqui ou importar outro arquivo .litertlm. O modelo fica salvo no armazenamento privado do aplicativo.", fontSize = 12.sp)
+                        Spacer(Modifier.height(8.dp))
+                        Text("O primeiro download exige internet e espaço livre. Depois, as respostas do modelo são geradas localmente.", fontSize = 11.sp, color = Color(0xFFC7B98F))
                         Spacer(Modifier.height(12.dp))
-                        Text("Privacidade: o aplicativo não solicita acesso à internet e não grava arquivos de áudio. O reconhecimento offline depende do suporte do Android no aparelho.", fontSize = 12.sp, color = Color(0xFF9CB6C3))
+                        Text("Privacidade: o aplicativo não solicita acesso à internet e não grava arquivos de áudio. O reconhecimento offline depende do suporte do Android no aparelho.", fontSize = 12.sp, color = Color(0xFFC7B98F))
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = { showSettings = false; onClearHistory() }) {
                             Text("APAGAR HISTÓRICO DA CONVERSA", color = Color(0xFFFF9C9C))
@@ -225,53 +303,56 @@ private fun HeliosScreen(
                     }
                 },
                 confirmButton = {
-                    TextButton(onClick = { showSettings = false; onPickModel() }) { Text("IMPORTAR MODELO") }
+                    Row {
+                        TextButton(onClick = onDownloadModel) { Text("BAIXAR QWEN3") }
+                        TextButton(onClick = { showSettings = false; onPickModel() }) { Text("IMPORTAR") }
+                    }
                 },
                 dismissButton = { TextButton(onClick = { showSettings = false }) { Text("FECHAR") } }
             )
         }
-        Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF071827), Color(0xFF03070D)))).padding(16.dp)) {
+        Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF171106), Color(0xFF080704)))).padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Column {
-                    Text("HÉLIOS", color = Color(0xFF8DEBFF), fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
-                    Text("ASSISTENTE PESSOAL", color = Color(0xFF648A9D), fontSize = 9.sp, letterSpacing = 2.sp)
+                    Text("HÉLIOS", color = Color(0xFFFFD34E), fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+                    Text("ASSISTENTE PESSOAL", color = Color(0xFFA88B3C), fontSize = 9.sp, letterSpacing = 2.sp)
                 }
-                TextButton(onClick = { showSettings = true }) { Text("CONFIGURAÇÕES", color = Color(0xFF75CFE5), fontSize = 10.sp) }
+                TextButton(onClick = { showSettings = true }) { Text("CONFIGURAÇÕES", color = Color(0xFFEBC03A), fontSize = 10.sp) }
             }
             Spacer(Modifier.height(14.dp))
             Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
-                Box(Modifier.size(154.dp).scale(pulse).border(1.dp, Color(0x6648D9FF), CircleShape).padding(10.dp).border(1.dp, Color(0xAA48D9FF), CircleShape), contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(104.dp).background(Brush.radialGradient(listOf(Color(0xFF1D789B), Color(0xFF071A2A), Color.Transparent)), CircleShape).border(2.dp, Color(0xFF4ADFFF), CircleShape), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(154.dp).scale(pulse).border(1.dp, Color(0x66FFC928), CircleShape).padding(10.dp).border(1.dp, Color(0xAAFFC928), CircleShape), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(104.dp).background(Brush.radialGradient(listOf(Color(0xFF8A6500), Color(0xFF071A2A), Color.Transparent)), CircleShape).border(2.dp, Color(0xFF4ADFFF), CircleShape), contentAlignment = Alignment.Center) {
                         Text("H", color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Light)
                     }
                 }
                 Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(state.uppercase(), color = Color(0xFF7DE7FF), fontSize = 11.sp, letterSpacing = 3.sp)
-                    Text(if (modelStatus.startsWith("Modelo instalado")) "IA LOCAL DISPONÍVEL" else "AGUARDANDO MODELO LOCAL", color = Color(0xFF496C7D), fontSize = 8.sp)
+                    Text(state.uppercase(), color = Color(0xFFFFCE32), fontSize = 11.sp, letterSpacing = 3.sp)
+                    Text(if (modelStatus.startsWith("Modelo instalado")) "IA LOCAL DISPONÍVEL" else "AGUARDANDO MODELO LOCAL", color = Color(0xFF9D7D28), fontSize = 8.sp)
                 }
             }
-            Text("CONVERSA", color = Color(0xFF6FBBD0), fontSize = 10.sp, letterSpacing = 2.sp)
+            Text("CONVERSA", color = Color(0xFFDDB43B), fontSize = 10.sp, letterSpacing = 2.sp)
             Spacer(Modifier.height(8.dp))
             LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(messages, key = { it.id }) { msg ->
-                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (msg.role == "user") Color(0xFF102638) else Color(0xFF0A1925)).padding(12.dp)) {
-                        Text(if (msg.role == "user") "VOCÊ" else "HÉLIOS", color = if (msg.role == "user") Color(0xFF77BBD4) else Color(0xFF69E4FF), fontSize = 9.sp, letterSpacing = 2.sp)
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (msg.role == "user") Color(0xFF2C220A) else Color(0xFF1A1509)).padding(12.dp)) {
+                        Text(if (msg.role == "user") "VOCÊ" else "HÉLIOS", color = if (msg.role == "user") Color(0xFFEAC24D) else Color(0xFFFFD34E), fontSize = 9.sp, letterSpacing = 2.sp)
                         Spacer(Modifier.height(4.dp))
-                        Text(msg.content, color = Color(0xFFD9EDF4), fontSize = 14.sp)
+                        Text(msg.content, color = Color(0xFFF5EAD0), fontSize = 14.sp)
                     }
                 }
-                if (messages.isEmpty()) item { Text("Olá. Sou Hélios. Importe um modelo local para começar a conversar com IA offline.", color = Color(0xFF91AEBB), fontSize = 14.sp) }
+                if (messages.isEmpty()) item { Text("Olá. Sou Hélios. Importe um modelo local para começar a conversar com IA offline.", color = Color(0xFFC7B98F), fontSize = 14.sp) }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("Fale comigo...") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF48D9FF), unfocusedBorderColor = Color(0xFF29495A)))
-                IconButton(onClick = { if (input.isNotBlank()) { onSend(input); input = "" } }) { Icon(Icons.Default.Send, "Enviar", tint = Color(0xFF63DFFF)) }
+                OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("Fale comigo...") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFFFFC928), unfocusedBorderColor = Color(0xFF6D571B)))
+                IconButton(onClick = { if (input.isNotBlank()) { onSend(input); input = "" } }) { Icon(Icons.Default.Send, "Enviar", tint = Color(0xFFFFCE32)) }
             }
             Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
                 FilledTonalIconButton(onClick = onMic) { Icon(Icons.Default.Mic, "Ouvir") }
                 OutlinedButton(onClick = onStop) { Icon(Icons.Default.Stop, null); Spacer(Modifier.width(4.dp)); Text("PARAR") }
                 TextButton(onClick = onRepeat) { Text("REPETIR RESPOSTA") }
             }
-            Text("O microfone só é acionado quando você toca no botão.", color = Color(0xFF587484), fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 5.dp))
+            Text("O microfone só é acionado quando você toca no botão.", color = Color(0xFF8F7839), fontSize = 9.sp, modifier = Modifier.align(Alignment.CenterHorizontally).padding(top = 5.dp))
         }
     }
 }
