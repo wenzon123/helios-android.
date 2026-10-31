@@ -93,7 +93,7 @@ private fun HeliosScreen(messages: List<ChatMessage>, state: String, lastReply: 
                 title = { Text("Conexão com a IA") },
                 text = {
                     Column {
-                        Text("Cole aqui a URL HTTPS do servidor HÉLIOS publicado. A chave da IA fica protegida no servidor, nunca no APK.", fontSize = 13.sp)
+                        Text("A conexão de IA ainda não está ativa nesta versão.", fontSize = 13.sp)
                         Spacer(Modifier.height(10.dp))
                         OutlinedTextField(value = backendUrl, onValueChange = { backendUrl = it }, label = { Text("URL do backend") }, placeholder = { Text("https://helios-seuapp.onrender.com") }, singleLine = true)
                     }
@@ -116,7 +116,7 @@ private fun HeliosScreen(messages: List<ChatMessage>, state: String, lastReply: 
                 }
                 Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(state.uppercase(), color = Color(0xFF7DE7FF), fontSize = 11.sp, letterSpacing = 3.sp)
-                    Text("NÚCLEO ONLINE · VOZ SOB DEMANDA", color = Color(0xFF496C7D), fontSize = 8.sp)
+                    Text("VOZ SOB DEMANDA · IA EM CONFIGURAÇÃO", color = Color(0xFF496C7D), fontSize = 8.sp)
                 }
             }
             Text("CONVERSA", color = Color(0xFF6FBBD0), fontSize = 10.sp, letterSpacing = 2.sp)
