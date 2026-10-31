@@ -8,17 +8,34 @@ import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import com.helios.assistant.data.Turn
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 class LocalAiEngine {
+    private val mutex = Mutex()
+    private var engine: Engine? = null
+    private var loadedPath: String? = null
+
     suspend fun reply(modelPath: String, history: List<Turn>, prompt: String): String =
         withContext(Dispatchers.IO) {
-            val config = EngineConfig(
-                modelPath = modelPath,
-                backend = Backend.CPU()
-            )
-            Engine(config).use { engine ->
-                engine.initialize()
+            mutex.withLock {
+                val activeEngine = if (engine != null && loadedPath == modelPath) {
+                    engine!!
+                } else {
+                    engine?.close()
+                    Engine(
+                        EngineConfig(
+                            modelPath = modelPath,
+                            backend = Backend.CPU()
+                        )
+                    ).also {
+                        it.initialize()
+                        engine = it
+                        loadedPath = modelPath
+                    }
+                }
+
                 val initialMessages = history.mapNotNull { turn ->
                     when (turn.role) {
                         "user" -> Message.user(turn.content)
@@ -34,11 +51,15 @@ class LocalAiEngine {
                     ),
                     initialMessages = initialMessages
                 )
-                engine.createConversation(conversationConfig).use { conversation ->
+                activeEngine.createConversation(conversationConfig).use { conversation ->
                     conversation.sendMessage(prompt).text.trim()
                 }
             }
         }
 
-    fun close() = Unit
+    fun close() {
+        engine?.close()
+        engine = null
+        loadedPath = null
+    }
 }
