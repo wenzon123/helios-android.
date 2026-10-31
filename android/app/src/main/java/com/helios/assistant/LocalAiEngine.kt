@@ -7,37 +7,69 @@ import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import com.helios.assistant.data.Turn
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import java.io.File
 
 class LocalAiEngine {
     private val mutex = Mutex()
     private var engine: Engine? = null
     private var loadedPath: String? = null
+    private var activeBackend: String = "GPU"
+
+    private fun loadEngineLocked(modelPath: String): Engine {
+        if (engine != null && loadedPath == modelPath) return engine!!
+
+        engine?.close()
+        engine = null
+        loadedPath = null
+
+        val cachePath = File(modelPath).parentFile
+            ?.resolve("litert-cache")
+            ?.apply { mkdirs() }
+            ?.absolutePath
+
+        // Tenta GPU primeiro. Se o aparelho/driver não suportar OpenCL,
+        // fecha a tentativa e inicializa em CPU para não deixar a IA inutilizável.
+        val gpuAttempt = runCatching {
+            Engine(
+                EngineConfig(
+                    modelPath = modelPath,
+                    backend = Backend.GPU(),
+                    cacheDir = cachePath
+                )
+            ).also { it.initialize() }
+        }
+
+        val ready = gpuAttempt.getOrElse {
+            Engine(
+                EngineConfig(
+                    modelPath = modelPath,
+                    backend = Backend.CPU(),
+                    cacheDir = cachePath
+                )
+            ).also { it.initialize() }.also { activeBackend = "CPU" }
+        }
+
+        if (activeBackend != "CPU") activeBackend = "GPU"
+        engine = ready
+        loadedPath = modelPath
+        return ready
+    }
+
+    suspend fun prepare(modelPath: String): String = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            loadEngineLocked(modelPath)
+            activeBackend
+        }
+    }
 
     suspend fun reply(modelPath: String, history: List<Turn>, prompt: String): String =
         withContext(Dispatchers.IO) {
             mutex.withLock {
-                val activeEngine = if (engine != null && loadedPath == modelPath) {
-                    engine!!
-                } else {
-                    engine?.close()
-                    Engine(
-                        EngineConfig(
-                            modelPath = modelPath,
-                            backend = Backend.GPU(),
-                            cacheDir = File(modelPath).parentFile?.resolve("litert-cache")?.apply { mkdirs() }?.absolutePath
-                        )
-                    ).also {
-                        it.initialize()
-                        engine = it
-                        loadedPath = modelPath
-                    }
-                }
-
+                val activeEngine = loadEngineLocked(modelPath)
                 val initialMessages = history.mapNotNull { turn ->
                     when (turn.role) {
                         "user" -> Message.user(turn.content)
@@ -48,7 +80,7 @@ class LocalAiEngine {
                 val conversationConfig = ConversationConfig(
                     systemInstruction = Contents.of(
                         "Você é HÉLIOS, assistente pessoal em português brasileiro. " +
-                            "Responda naturalmente, de forma direta e curta. " +
+                            "Responda naturalmente, de forma direta e útil, sem enrolação. " +
                             "Não invente fatos; admita quando não souber."
                     ),
                     initialMessages = initialMessages
