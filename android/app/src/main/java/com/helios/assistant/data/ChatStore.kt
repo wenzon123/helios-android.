@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
+data class Turn(val role: String, val content: String)
+
 @Entity(tableName = "messages")
 data class ChatMessage(@PrimaryKey(autoGenerate = true) val id: Long = 0, val role: String, val content: String, val createdAt: Long = System.currentTimeMillis())
 
