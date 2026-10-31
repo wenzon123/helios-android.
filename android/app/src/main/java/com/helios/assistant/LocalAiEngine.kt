@@ -52,7 +52,7 @@ class LocalAiEngine {
                     initialMessages = initialMessages
                 )
                 activeEngine.createConversation(conversationConfig).use { conversation ->
-                    conversation.sendMessage(prompt).text.trim()
+                    conversation.sendMessage(prompt).toString().trim()
                 }
             }
         }
