@@ -2,7 +2,9 @@ package com.helios.assistant
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Bundle
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,7 +30,11 @@ import androidx.lifecycle.lifecycleScope
 import com.helios.assistant.data.*
 import com.helios.assistant.automation.DeviceActions
 import com.helios.assistant.voice.SpeechController
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -37,74 +43,174 @@ class MainActivity : ComponentActivity() {
     private lateinit var dao: ChatDao
     private lateinit var speech: SpeechController
     private lateinit var actions: DeviceActions
+    private lateinit var localAi: LocalAiEngine
     private var voiceState by mutableStateOf("Pronto")
     private var lastReply by mutableStateOf("")
-    private val preferences by lazy { getSharedPreferences("helios", MODE_PRIVATE) }
-    private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted -> if (granted) speech.listen() else voiceState = "Permissão de microfone negada" }
+    private var modelState by mutableStateOf("Modelo local não instalado")
+    private val requestMic = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        if (granted) speech.listen() else voiceState = "Permissão de microfone negada"
+    }
+    private val pickModel = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importModel(uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         dao = HeliosDatabase.get(this).chatDao()
         actions = DeviceActions(this)
+        localAi = LocalAiEngine()
+        val modelFile = File(filesDir, "models/helios-model.litertlm")
+        if (modelFile.exists()) modelState = "Modelo instalado • \${modelFile.length() / (1024 * 1024)} MB"
         speech = SpeechController(this, { text -> handleUserText(text) }, { state -> voiceState = state })
         setContent {
             val messages by dao.observeAll().collectAsState(initial = emptyList())
-            HeliosScreen(messages, voiceState, lastReply,
+            HeliosScreen(
+                messages = messages,
+                state = voiceState,
+                modelStatus = modelState,
                 onSend = { handleUserText(it) },
-                onMic = { if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) speech.listen() else requestMic.launch(Manifest.permission.RECORD_AUDIO) },
-                onStop = { speech.stop() }, onRepeat = { if (lastReply.isNotBlank()) speech.speak(lastReply) },
-                onSettings = { }, initialBackendUrl = preferences.getString("backend_url", "") ?: "", onSaveBackend = { url -> preferences.edit().putString("backend_url", url).apply() })
+                onMic = {
+                    if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) speech.listen()
+                    else requestMic.launch(Manifest.permission.RECORD_AUDIO)
+                },
+                onStop = { speech.stop() },
+                onRepeat = { if (lastReply.isNotBlank()) speech.speak(lastReply) },
+                onPickModel = { pickModel.launch(arrayOf("*/*")) }
+            )
         }
     }
+
+    private fun importModel(uri: Uri) {
+        lifecycleScope.launch {
+            modelState = "Importando modelo…"
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val name = contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                        val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (cursor.moveToFirst() && index >= 0) cursor.getString(index) else null
+                    } ?: "modelo"
+                    require(name.endsWith(".litertlm", ignoreCase = true)) { "Escolha um arquivo .litertlm compatível." }
+                    val folder = File(filesDir, "models").apply { mkdirs() }
+                    val temp = File(folder, "helios-model.tmp")
+                    contentResolver.openInputStream(uri).use { input ->
+                        requireNotNull(input) { "Não foi possível abrir o arquivo selecionado." }
+                        FileOutputStream(temp).use { output -> input.copyTo(output) }
+                    }
+                    val target = File(folder, "helios-model.litertlm")
+                    if (target.exists()) target.delete()
+                    check(temp.renameTo(target)) { "Não foi possível salvar o modelo." }
+                    target
+                }
+            }
+            result.onSuccess { file ->
+                modelState = "Modelo instalado • \${file.length() / (1024 * 1024)} MB"
+                respond("Modelo local importado. Na próxima mensagem vou inicializar a IA no próprio celular.")
+            }.onFailure {
+                modelState = "Falha ao importar modelo"
+                respond("Não consegui importar o modelo: \${it.message ?: "arquivo inválido"}.")
+            }
+        }
+    }
+
     private fun handleUserText(raw: String) {
-        val text = raw.trim(); if (text.isBlank()) return
+        val text = raw.trim()
+        if (text.isBlank()) return
         lifecycleScope.launch {
             dao.insert(ChatMessage(role = "user", content = text))
             val lower = text.lowercase(Locale("pt", "BR"))
             when {
-                lower.contains("que horas") || lower.contains("horário") -> respond("Agora são ${SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date())}.")
-                lower.contains("que dia") || lower.contains("data de hoje") -> respond("Hoje é ${SimpleDateFormat("EEEE, dd/MM/yyyy", Locale("pt", "BR")).format(Date())}.")
-                lower.contains("abra o youtube") || lower == "youtube" -> { runCatching { actions.openYouTube() }; respond("Abrindo o YouTube.") }
-                lower.startsWith("pesquise ") || lower.startsWith("pesquisar ") || lower.startsWith("pesquisa ") -> { val q = text.substringAfter(' '); actions.searchWeb(q); respond("Abrindo uma pesquisa sobre $q.") }
-                lower.contains("configurações") -> { actions.openSettings(); respond("Abrindo as configurações do Android.") }
+                lower.contains("que horas") || lower.contains("horário") ->
+                    respond("Agora são \${SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date())}.")
+                lower.contains("que dia") || lower.contains("data de hoje") ->
+                    respond("Hoje é \${SimpleDateFormat("EEEE, dd/MM/yyyy", Locale("pt", "BR")).format(Date())}.")
+                lower.contains("abra o youtube") || lower == "youtube" -> {
+                    runCatching { actions.openYouTube() }
+                    respond("Abrindo o YouTube.")
+                }
+                lower.startsWith("pesquise ") || lower.startsWith("pesquisar ") || lower.startsWith("pesquisa ") -> {
+                    val q = text.substringAfter(' ')
+                    actions.searchWeb(q)
+                    respond("Abrindo uma pesquisa sobre $q.")
+                }
+                lower.contains("configurações") -> {
+                    actions.openSettings()
+                    respond("Abrindo as configurações do Android.")
+                }
                 else -> {
-                    voiceState = "Conectando à IA"
-                    val recent = dao.recent().reversed().map { Turn(it.role, it.content) }
-                    val base = preferences.getString("backend_url", "") ?: ""
-                    if (base.isBlank()) respond("Minha conexão com a IA ainda não foi configurada. Abra Configurações e informe a URL HTTPS do servidor HÉLIOS. A voz já funciona pelo botão do microfone.")
-                    else runCatching { AiClient(base).reply(recent) }.onSuccess { respond(it.reply) }.onFailure { respond("Não consegui conectar à inteligência artificial. Verifique a internet e o endereço do backend.") }
+                    val modelFile = File(filesDir, "models/helios-model.litertlm")
+                    if (!modelFile.exists()) {
+                        respond("A IA local ainda não tem um modelo instalado. Abra Configurações e toque em IMPORTAR MODELO para selecionar um arquivo .litertlm.")
+                    } else {
+                        voiceState = "IA LOCAL PROCESSANDO"
+                        val history = dao.recent().reversed().dropLast(1).takeLast(10).map { Turn(it.role, it.content) }
+                        runCatching { localAi.reply(modelFile.absolutePath, history, text) }
+                            .onSuccess { respond(it) }
+                            .onFailure { respond("Não consegui iniciar ou executar o modelo local. Confira se o arquivo é compatível. Detalhe: \${it.message ?: "erro desconhecido"}") }
+                    }
                 }
             }
         }
     }
-    private suspend fun respond(text: String) { lastReply = text; dao.insert(ChatMessage(role = "assistant", content = text)); voiceState = "Respondendo"; speech.speak(text); voiceState = "Pronto" }
-    override fun onDestroy() { speech.close(); super.onDestroy() }
+
+    private suspend fun respond(text: String) {
+        lastReply = text
+        dao.insert(ChatMessage(role = "assistant", content = text))
+        voiceState = "Respondendo"
+        speech.speak(text)
+        voiceState = "Pronto"
+    }
+
+    override fun onDestroy() {
+        speech.close()
+        localAi.close()
+        super.onDestroy()
+    }
 }
 
 @Composable
-private fun HeliosScreen(messages: List<ChatMessage>, state: String, lastReply: String, onSend: (String) -> Unit, onMic: () -> Unit, onStop: () -> Unit, onRepeat: () -> Unit, onSettings: () -> Unit, initialBackendUrl: String, onSaveBackend: (String) -> Unit) {
+private fun HeliosScreen(
+    messages: List<ChatMessage>,
+    state: String,
+    modelStatus: String,
+    onSend: (String) -> Unit,
+    onMic: () -> Unit,
+    onStop: () -> Unit,
+    onRepeat: () -> Unit,
+    onPickModel: () -> Unit
+) {
     var input by remember { mutableStateOf("") }
     var showSettings by remember { mutableStateOf(false) }
-    var backendUrl by remember { mutableStateOf(initialBackendUrl) }
-    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(initialValue = 0.92f, targetValue = 1.06f, animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "core")
+    val pulse by rememberInfiniteTransition(label = "pulse").animateFloat(
+        initialValue = 0.92f, targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(tween(1800, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "core"
+    )
     MaterialTheme(colorScheme = darkColorScheme(primary = Color(0xFF48D9FF), background = Color(0xFF050B14), surface = Color(0xFF0B1725))) {
         if (showSettings) {
             AlertDialog(
                 onDismissRequest = { showSettings = false },
-                title = { Text("Conexão com a IA") },
+                title = { Text("IA local do HÉLIOS") },
                 text = {
                     Column {
-                        Text("A conexão de IA ainda não está ativa nesta versão.", fontSize = 13.sp)
+                        Text("O modelo é armazenado no celular e a conversa é processada localmente. O arquivo não vem dentro do APK.", fontSize = 13.sp)
                         Spacer(Modifier.height(10.dp))
-                        OutlinedTextField(value = backendUrl, onValueChange = { backendUrl = it }, label = { Text("URL do backend") }, placeholder = { Text("https://helios-seuapp.onrender.com") }, singleLine = true)
+                        Text(modelStatus, color = Color(0xFF79DFF5), fontSize = 12.sp)
+                        Spacer(Modifier.height(12.dp))
+                        Text("Selecione um arquivo .litertlm obtido de uma fonte oficial e compatível com LiteRT-LM.", fontSize = 12.sp)
                     }
                 },
-                confirmButton = { TextButton(onClick = { onSaveBackend(backendUrl.trim().trimEnd('/')); showSettings = false }) { Text("SALVAR") } },
-                dismissButton = { TextButton(onClick = { showSettings = false }) { Text("CANCELAR") } }
+                confirmButton = {
+                    TextButton(onClick = { showSettings = false; onPickModel() }) { Text("IMPORTAR MODELO") }
+                },
+                dismissButton = { TextButton(onClick = { showSettings = false }) { Text("FECHAR") } }
             )
         }
         Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF071827), Color(0xFF03070D)))).padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Column { Text("HÉLIOS", color = Color(0xFF8DEBFF), fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp); Text("ASSISTENTE PESSOAL", color = Color(0xFF648A9D), fontSize = 9.sp, letterSpacing = 2.sp) }
+                Column {
+                    Text("HÉLIOS", color = Color(0xFF8DEBFF), fontSize = 24.sp, fontWeight = FontWeight.Bold, letterSpacing = 4.sp)
+                    Text("ASSISTENTE PESSOAL", color = Color(0xFF648A9D), fontSize = 9.sp, letterSpacing = 2.sp)
+                }
                 TextButton(onClick = { showSettings = true }) { Text("CONFIGURAÇÕES", color = Color(0xFF75CFE5), fontSize = 10.sp) }
             }
             Spacer(Modifier.height(14.dp))
@@ -116,19 +222,20 @@ private fun HeliosScreen(messages: List<ChatMessage>, state: String, lastReply: 
                 }
                 Column(Modifier.align(Alignment.BottomCenter), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(state.uppercase(), color = Color(0xFF7DE7FF), fontSize = 11.sp, letterSpacing = 3.sp)
-                    Text("VOZ SOB DEMANDA · IA EM CONFIGURAÇÃO", color = Color(0xFF496C7D), fontSize = 8.sp)
+                    Text(if (modelStatus.startsWith("Modelo instalado")) "IA LOCAL DISPONÍVEL" else "AGUARDANDO MODELO LOCAL", color = Color(0xFF496C7D), fontSize = 8.sp)
                 }
             }
             Text("CONVERSA", color = Color(0xFF6FBBD0), fontSize = 10.sp, letterSpacing = 2.sp)
             Spacer(Modifier.height(8.dp))
-            LazyColumn(Modifier.weight(1f).fillMaxWidth(), reverseLayout = false, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(messages, key = { it.id }) { msg ->
                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(if (msg.role == "user") Color(0xFF102638) else Color(0xFF0A1925)).padding(12.dp)) {
                         Text(if (msg.role == "user") "VOCÊ" else "HÉLIOS", color = if (msg.role == "user") Color(0xFF77BBD4) else Color(0xFF69E4FF), fontSize = 9.sp, letterSpacing = 2.sp)
-                        Spacer(Modifier.height(4.dp)); Text(msg.content, color = Color(0xFFD9EDF4), fontSize = 14.sp)
+                        Spacer(Modifier.height(4.dp))
+                        Text(msg.content, color = Color(0xFFD9EDF4), fontSize = 14.sp)
                     }
                 }
-                if (messages.isEmpty()) item { Text("Olá. Sou Hélios. Posso conversar, abrir aplicativos e pesquisar na internet.", color = Color(0xFF91AEBB), fontSize = 14.sp) }
+                if (messages.isEmpty()) item { Text("Olá. Sou Hélios. Importe um modelo local para começar a conversar com IA offline.", color = Color(0xFF91AEBB), fontSize = 14.sp) }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(value = input, onValueChange = { input = it }, modifier = Modifier.weight(1f), placeholder = { Text("Fale comigo...") }, singleLine = true, colors = OutlinedTextFieldDefaults.colors(focusedTextColor = Color.White, unfocusedTextColor = Color.White, focusedBorderColor = Color(0xFF48D9FF), unfocusedBorderColor = Color(0xFF29495A)))
