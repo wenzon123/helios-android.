@@ -287,15 +287,15 @@ private fun HeliosScreen(
                         Text(modelStatus, color = Color(0xFFFFD34E), fontSize = 12.sp)
                         if (modelStatus.startsWith("Baixando") || modelStatus.startsWith("Preparando")) {
                             Spacer(Modifier.height(8.dp))
-                            LinearProgressIndicator(progress = { downloadProgress }, modifier = Modifier.fillMaxWidth(), color = Color(0xFFFFC928))
+                            LinearProgressIndicator(progress = downloadProgress, modifier = Modifier.fillMaxWidth(), color = Color(0xFFFFC928))
                             Text("${(downloadProgress * 100).toInt()}%", fontSize = 11.sp, color = Color(0xFFC7B98F))
                         }
                         Spacer(Modifier.height(12.dp))
-                        Text("Você pode baixar o Qwen3 0.6B (aprox. 329 MB) diretamente aqui ou importar outro arquivo .litertlm. O modelo fica salvo no armazenamento privado do aplicativo.", fontSize = 12.sp)
+                        Text("Você pode baixar o Qwen3 0.6B (aprox. 347 MB) diretamente aqui ou importar outro arquivo .litertlm. O modelo fica salvo no armazenamento privado do aplicativo.", fontSize = 12.sp)
                         Spacer(Modifier.height(8.dp))
                         Text("O primeiro download exige internet e espaço livre. Depois, as respostas do modelo são geradas localmente.", fontSize = 11.sp, color = Color(0xFFC7B98F))
                         Spacer(Modifier.height(12.dp))
-                        Text("Privacidade: o aplicativo não solicita acesso à internet e não grava arquivos de áudio. O reconhecimento offline depende do suporte do Android no aparelho.", fontSize = 12.sp, color = Color(0xFFC7B98F))
+                        Text("Privacidade: a internet é usada somente quando você solicita o download do modelo. Depois da instalação, a IA responde localmente. O reconhecimento de voz offline depende do suporte do Android no aparelho.", fontSize = 12.sp, color = Color(0xFFC7B98F))
                         Spacer(Modifier.height(8.dp))
                         TextButton(onClick = { showSettings = false; onClearHistory() }) {
                             Text("APAGAR HISTÓRICO DA CONVERSA", color = Color(0xFFFF9C9C))
