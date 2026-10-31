@@ -60,7 +60,7 @@ class MainActivity : ComponentActivity() {
         actions = DeviceActions(this)
         localAi = LocalAiEngine()
         val modelFile = File(filesDir, "models/helios-model.litertlm")
-        if (modelFile.exists()) modelState = "Modelo instalado • \${modelFile.length() / (1024 * 1024)} MB"
+        if (modelFile.exists()) modelState = "Modelo instalado • ${modelFile.length() / (1024 * 1024)} MB"
         speech = SpeechController(this, { text -> handleUserText(text) }, { state -> voiceState = state })
         setContent {
             val messages by dao.observeAll().collectAsState(initial = emptyList())
@@ -103,11 +103,11 @@ class MainActivity : ComponentActivity() {
                 }
             }
             result.onSuccess { file ->
-                modelState = "Modelo instalado • \${file.length() / (1024 * 1024)} MB"
+                modelState = "Modelo instalado • ${file.length() / (1024 * 1024)} MB"
                 respond("Modelo local importado. Na próxima mensagem vou inicializar a IA no próprio celular.")
             }.onFailure {
                 modelState = "Falha ao importar modelo"
-                respond("Não consegui importar o modelo: \${it.message ?: "arquivo inválido"}.")
+                respond("Não consegui importar o modelo: ${it.message ?: "arquivo inválido"}.")
             }
         }
     }
@@ -120,9 +120,9 @@ class MainActivity : ComponentActivity() {
             val lower = text.lowercase(Locale("pt", "BR"))
             when {
                 lower.contains("que horas") || lower.contains("horário") ->
-                    respond("Agora são \${SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date())}.")
+                    respond("Agora são ${SimpleDateFormat("HH:mm", Locale("pt", "BR")).format(Date())}.")
                 lower.contains("que dia") || lower.contains("data de hoje") ->
-                    respond("Hoje é \${SimpleDateFormat("EEEE, dd/MM/yyyy", Locale("pt", "BR")).format(Date())}.")
+                    respond("Hoje é ${SimpleDateFormat("EEEE, dd/MM/yyyy", Locale("pt", "BR")).format(Date())}.")
                 lower.contains("abra o youtube") || lower == "youtube" -> {
                     runCatching { actions.openYouTube() }
                     respond("Abrindo o YouTube.")
@@ -145,7 +145,7 @@ class MainActivity : ComponentActivity() {
                         val history = dao.recent().reversed().dropLast(1).takeLast(10).map { Turn(it.role, it.content) }
                         runCatching { localAi.reply(modelFile.absolutePath, history, text) }
                             .onSuccess { respond(it) }
-                            .onFailure { respond("Não consegui iniciar ou executar o modelo local. Confira se o arquivo é compatível. Detalhe: \${it.message ?: "erro desconhecido"}") }
+                            .onFailure { respond("Não consegui iniciar ou executar o modelo local. Confira se o arquivo é compatível. Detalhe: ${it.message ?: "erro desconhecido"}") }
                     }
                 }
             }
