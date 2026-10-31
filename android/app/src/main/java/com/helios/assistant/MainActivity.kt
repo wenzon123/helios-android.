@@ -63,7 +63,20 @@ class MainActivity : ComponentActivity() {
         actions = DeviceActions(this)
         localAi = LocalAiEngine()
         val modelFile = File(filesDir, "models/helios-model.litertlm")
-        if (modelFile.exists()) modelState = "Modelo instalado • ${modelFile.length() / (1024 * 1024)} MB"
+        if (modelFile.exists()) {
+            modelState = "Modelo instalado • preparando IA…"
+            lifecycleScope.launch {
+                runCatching { localAi.prepare(modelFile.absolutePath) }
+                    .onSuccess { backend ->
+                        modelState = "Modelo instalado • ${modelFile.length() / (1024 * 1024)} MB"
+                        voiceState = "IA local pronta • ${backend}"
+                    }
+                    .onFailure {
+                        modelState = "Modelo instalado, mas não iniciou"
+                        voiceState = "Falha ao iniciar IA"
+                    }
+            }
+        }
         speech = SpeechController(this, { text -> handleUserText(text) }, { state -> voiceState = state })
         setContent {
             val messages by dao.observeAll().collectAsState(initial = emptyList())
@@ -339,7 +352,7 @@ private fun HeliosScreen(
             Spacer(Modifier.height(14.dp))
             Box(Modifier.fillMaxWidth().height(190.dp), contentAlignment = Alignment.Center) {
                 Box(Modifier.size(154.dp).scale(pulse).border(1.dp, Color(0x66FFC928), CircleShape).padding(10.dp).border(1.dp, Color(0xAAFFC928), CircleShape), contentAlignment = Alignment.Center) {
-                    Box(Modifier.size(104.dp).background(Brush.radialGradient(listOf(Color(0xFF8A6500), Color(0xFF071A2A), Color.Transparent)), CircleShape).border(2.dp, Color(0xFF4ADFFF), CircleShape), contentAlignment = Alignment.Center) {
+                    Box(Modifier.size(104.dp).background(Brush.radialGradient(listOf(Color(0xFF8A6500), Color(0xFF302300), Color.Transparent)), CircleShape).border(2.dp, Color(0xFFFFD34E), CircleShape), contentAlignment = Alignment.Center) {
                         Text("H", color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Light)
                     }
                 }
